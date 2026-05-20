@@ -8,7 +8,7 @@ An autonomous agent that watches your GitHub Actions pipelines, diagnoses failur
 
 ![CI/CD Agent Report](docs/demo.png)
 
-**Live example:** [View a real agent report on GitHub →](https://github.com/kv-1505/cicd-agent/commit/f43a87189f68b564af86665ea5b9dcb474e4aaf9)
+**Live example:** [View a real agent report on GitHub →](https://github.com/kv-1505/cicd-agent/commit/67c6b969b4e196a4be763ccfd5b124bd6d86336e)
 
 ---
 
