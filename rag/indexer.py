@@ -8,7 +8,14 @@ from sentence_transformers import SentenceTransformer
 from git import Repo
 from config import EMBEDDING_MODEL, FAISS_INDEX_PATH
 
-model = SentenceTransformer(EMBEDDING_MODEL)
+_model = None
+
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = SentenceTransformer(EMBEDDING_MODEL)
+    return _model
 
 
 def chunk_python_file(file_path: str, content: str) -> list[dict]:
@@ -132,7 +139,7 @@ def index_repository(repo_url: str, local_path: str = None) -> tuple[faiss.Index
 
     # Embed all chunks
     texts = [f"{c['file']}:{c['name']}\n{c['code']}" for c in chunks]
-    embeddings = model.encode(texts, show_progress_bar=True)
+    embeddings = get_model().encode(texts, show_progress_bar=True)
     embeddings = np.array(embeddings).astype('float32')
 
     # Build FAISS index

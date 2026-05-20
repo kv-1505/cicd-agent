@@ -5,7 +5,14 @@ import faiss
 from sentence_transformers import SentenceTransformer
 from config import EMBEDDING_MODEL, FAISS_INDEX_PATH
 
-model = SentenceTransformer(EMBEDDING_MODEL)
+_model = None
+
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = SentenceTransformer(EMBEDDING_MODEL)
+    return _model
 
 _index = None
 _chunks = None
@@ -32,7 +39,7 @@ def retrieve_context(query: str, top_k: int = 5) -> str:
     if index is None:
         return "No code index available."
 
-    query_embedding = model.encode([query]).astype('float32')
+    query_embedding = get_model().encode([query]).astype('float32')
     distances, indices = index.search(query_embedding, top_k)
 
     results = []
