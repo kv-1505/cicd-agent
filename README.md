@@ -52,66 +52,25 @@ GitHub Actions fails
 
 ### Report Posted to GitHub
 
-```markdown
-## 🤖 CI/CD Agent Report
-
-### ❌ Build Failure Analysis
-**Error:** NameError: name 'this' is not defined
-**File:** `calculator.py` (line 6)
-**Root Cause:** syntax
-
-### 🔍 Blame Trace
-**Commit:** 823e971 by kv-1505
-**Message:** test: reindex v2
-
-### 💡 Proposed Fix
-**Confidence:** 🟢 0.95
-
- ```diff
-- this is broken
-+ 
- ```
-
-### ✅ Validation
-✅ Fix passed validation
-```
+![Agent Report](docs/demo.png)
 
 ---
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                     GitHub                               │
-│  push event ──────────────────────────────────────────┐ │
-│  workflow_run failure ──────────────────────────────┐  │ │
-└────────────────────────────────────────────────────────┘ │
-                                                    │   │
-                        ┌───────────────────────────┘   │
-                        │  FastAPI Webhook Server        │
-                        │  POST /webhook                 │
-                        └──────────┬────────────────┘   │
-                                   │                     │
-              ┌────────────────────┴──────────────┐      │
-              │                                   │      │
-              ▼                                   ▼      │
-    ┌──────────────────┐               ┌─────────────────┴──┐
-    │  Re-index Repo   │               │   LangGraph Agent   │
-    │  (on every push) │               │   6-node pipeline   │
-    └──────────────────┘               └────────────────────┘
-              │                                   │
-              ▼                                   ▼
-    ┌──────────────────┐               ┌──────────────────┐
-    │   FAISS Index    │◄──────────────│  Code Retriever  │
-    │ (sentence-trans) │               │  (RAG lookup)    │
-    └──────────────────┘               └──────────────────┘
-                                                │
-                                                ▼
-                                    ┌──────────────────────┐
-                                    │   Claude Sonnet 4    │
-                                    │  Log Analyser        │
-                                    │  Fix Proposer        │
-                                    └──────────────────────┘
+```mermaid
+flowchart TD
+    A([GitHub]) -->|push event| B[FastAPI Webhook\nPOST /webhook]
+    A -->|workflow_run failure| B
+
+    B -->|push| C[Re-index Repo\non every push]
+    B -->|failure| D[LangGraph Agent\n6-node pipeline]
+
+    C --> E[(FAISS Index\nsentence-transformers)]
+    D --> F[Code Retriever\nRAG lookup]
+    F -->|waits for lock| E
+
+    D --> G[Claude Sonnet 4\nLog Analyser · Fix Proposer]
 ```
 
 **Key design decisions:**
