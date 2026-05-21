@@ -33,9 +33,12 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
 
     print(f"[Webhook] Event: {event} | Action: {action} | Conclusion: {conclusion}")
 
-    # Re-index on every push (code changed)
+    # Re-index on every push (code changed) — only for the monitored repo
     if event == "push":
         repo_full_name = payload["repository"]["full_name"]
+        from config import REPO_FULL_NAME
+        if REPO_FULL_NAME and repo_full_name != REPO_FULL_NAME:
+            return {"status": "ignored"}
         background_tasks.add_task(reindex_repo, repo_full_name)
         return {"status": "reindexing"}
 
