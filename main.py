@@ -1,11 +1,15 @@
 import json
 import asyncio
 import threading
+import logging
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from gh_client.webhook import verify_webhook_signature
 from gh_client.client import fetch_workflow_logs
 from agent.graph import agent_graph
 from config import GITHUB_WEBHOOK_SECRET
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="CI/CD Agent")
 
@@ -79,10 +83,10 @@ def reindex_repo(repo_full_name: str):
 
 def run_agent_sync(repo_full_name: str, workflow_run_id: int, pr_number: int | None):
     try:
-        print(f"\n[Agent] Starting for {repo_full_name} run #{workflow_run_id}")
+        logger.info(f"\n[Agent] Starting for {repo_full_name} run #{workflow_run_id}")
 
         raw_logs = fetch_workflow_logs(repo_full_name, workflow_run_id)
-        print(f"[Agent] Fetched {len(raw_logs)} chars of logs")
+        logger.info(f"[Agent] Fetched {len(raw_logs)} chars of logs")
 
         initial_state = {
             "repo_full_name": repo_full_name,
@@ -100,12 +104,12 @@ def run_agent_sync(repo_full_name: str, workflow_run_id: int, pr_number: int | N
 
         result = agent_graph.invoke(initial_state)
 
-        print("\n=== AGENT RESULT ===")
-        print(f"Error: {result['error_analysis'].get('summary')}")
-        print(f"Blame: {result['blame_result'].get('commit_sha')} by {result['blame_result'].get('author')}")
-        print("===================\n")
+        logger.info("\n=== AGENT RESULT ===")
+        logger.info(f"Error: {result['error_analysis'].get('summary')}")
+        logger.info(f"Blame: {result['blame_result'].get('commit_sha')} by {result['blame_result'].get('author')}")
+        logger.info("===================\n")
 
     except Exception as e:
         import traceback
-        print(f"[Agent] ERROR: {e}")
-        print(traceback.format_exc())
+        logger.error(f"[Agent] ERROR: {e}")
+        logger.error(traceback.format_exc())
