@@ -1,14 +1,29 @@
 # CI/CD Agent 🤖
 
+![Python](https://img.shields.io/badge/python-3.12-blue)
+![LangGraph](https://img.shields.io/badge/LangGraph-agentic-purple)
+![Deployed](https://img.shields.io/badge/deployed-Render-green)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
+
 An autonomous agent that watches your GitHub Actions pipelines, diagnoses failures, traces the responsible commit, proposes a targeted fix, and posts a structured report — all without human intervention.
+
+---
+
+## Why I Built This
+
+As a developer working across Angular, Java, and DevOps at SAP, I constantly ran into the same frustration: a CI build fails, and you have to manually dig through hundreds of log lines, figure out which file broke, find the commit that introduced it, and then context-switch back into the code to fix it. It kills flow. I built this agent to do all of that automatically — the moment a build fails, it analyses the logs, traces the blame, proposes a fix, and posts it directly on GitHub.
+
+---
 
 ## Demo
 
-> Agent detects a syntax error, traces the blame to commit `823e971`, proposes a fix with 95% confidence, and posts the report to GitHub.
+> Agent detects a syntax error, traces the blame commit, proposes a fix with 95% confidence, and posts the report to GitHub.
 
 ![CI/CD Agent Report](docs/demo.png)
 
 **Live example:** [View a real agent report on GitHub →](https://github.com/kv-1505/cicd-agent/commit/67c6b969b4e196a4be763ccfd5b124bd6d86336e)
+
+**Live server:** [https://cicd-agent.onrender.com/health](https://cicd-agent.onrender.com/health)
 
 ---
 
@@ -31,12 +46,12 @@ GitHub Actions fails
        │
        ▼
 ┌────────────────┐
-│ Code Retriever │  RAG lookup — fetches relevant code context from FAISS index
+│ Code Retriever │  BM25 search — fetches relevant code context from index
 └──────┬─────────┘
        │
        ▼
 ┌───────────────┐
-│ Fix Proposer  │  Claude proposes a targeted fix (snippet-level, not full file)
+│ Fix Proposer  │  LLM proposes a targeted fix (snippet-level, not full file)
 └──────┬────────┘
        │
        ▼
@@ -50,10 +65,6 @@ GitHub Actions fails
 └───────────────┘
 ```
 
-### Report Posted to GitHub
-
-![Agent Report](docs/demo.png)
-
 ---
 
 ## Architecture
@@ -66,11 +77,13 @@ flowchart TD
     B -->|push| C[Re-index Repo\non every push]
     B -->|failure| D[LangGraph Agent\n6-node pipeline]
 
-    C --> E[(FAISS Index\nsentence-transformers)]
-    D --> F[Code Retriever\nRAG lookup]
+    C --> E[(BM25 Index\nAST-chunked Python)]
+    D --> F[Code Retriever\nBM25 search]
     F -->|waits for lock| E
 
-    D --> G[Claude Sonnet 4\nLog Analyser · Fix Proposer]
+    D --> G[Groq LLM\nLog Analyser · Fix Proposer]
+
+    D --> H[MCP Server\nquery from Claude]
 ```
 
 **Key design decisions:**
@@ -78,6 +91,33 @@ flowchart TD
 - **Thread-safe locking** — if re-indexing and a failure arrive simultaneously, the agent waits for indexing to finish before querying
 - **Snippet-level diffs** — fix proposals show only the changed line, not the whole file
 - **Retry loop** — validator rejects low-confidence or syntactically invalid fixes and loops back to Fix Proposer (max 2 retries)
+- **BM25 over vector embeddings** — lightweight keyword search works well for code (exact variable/function names), no GPU or heavy model needed
+- **MCP server** — exposes `diagnose_failure` as a tool, so you can query any repo's failures directly from Claude
+
+---
+
+## MCP Server
+
+The agent exposes two tools via the [Model Context Protocol](https://modelcontextprotocol.io):
+
+| Tool | Description |
+|------|-------------|
+| `get_recent_failures` | List recent failed workflow runs for any repo |
+| `diagnose_failure` | Run the full agent pipeline on a specific run ID |
+
+**Usage in Claude Code:**
+```
+> Get recent failures for owner/repo
+> Diagnose failure #26236504769 in kv-1505/cicd-agent-test
+```
+
+**Setup:**
+```bash
+claude mcp add cicd-agent \
+  -e GROQ_API_KEY=... \
+  -e GITHUB_TOKEN=... \
+  -- /path/to/venv/bin/python /path/to/mcp_server/server.py
+```
 
 ---
 
@@ -87,11 +127,12 @@ flowchart TD
 |-------|-----------|
 | Webhook server | FastAPI + Uvicorn |
 | Agent orchestration | LangGraph |
-| LLM | Claude Sonnet 4 (Anthropic) |
-| Embeddings | sentence-transformers (`all-MiniLM-L6-v2`) |
-| Vector search | FAISS (IndexFlatL2) |
+| LLM | Groq (llama-3.3-70b-versatile) |
+| Code search | BM25 (rank-bm25) |
 | Code chunking | Python AST parser |
 | GitHub API | PyGithub |
+| MCP server | Model Context Protocol SDK |
+| Deployment | Docker + Render |
 | Signature verification | HMAC-SHA256 |
 
 ---
@@ -102,19 +143,22 @@ flowchart TD
 cicd-agent/
 ├── main.py                  # FastAPI server, webhook handler, reindex lock
 ├── config.py                # Environment variable loader
+├── Dockerfile               # Container for Render deployment
 ├── agent/
 │   ├── graph.py             # LangGraph pipeline definition + retry logic
 │   ├── state.py             # AgentState TypedDict
 │   └── nodes/
 │       ├── log_analyser.py  # Parse CI logs → structured error JSON
 │       ├── blame_tracer.py  # Find responsible commit via GitHub API
-│       ├── code_retriever.py# RAG query with reindex-lock awareness
-│       ├── fix_proposer.py  # Claude proposes targeted fix
+│       ├── code_retriever.py# BM25 search with reindex-lock awareness
+│       ├── fix_proposer.py  # LLM proposes targeted fix
 │       ├── validator.py     # Syntax check + confidence + placeholder check
 │       └── pr_reporter.py   # Post Markdown report to GitHub
 ├── rag/
-│   ├── indexer.py           # Clone repo, AST-chunk Python files, build FAISS index
-│   └── retriever.py         # Query index, return formatted code context
+│   ├── indexer.py           # Clone repo, AST-chunk Python files, build BM25 index
+│   └── retriever.py         # BM25 search, return formatted code context
+├── mcp_server/
+│   └── server.py            # MCP tools: diagnose_failure, get_recent_failures
 └── gh_client/
     ├── client.py            # Fetch + decode workflow logs (ZIP format)
     └── webhook.py           # Verify GitHub webhook HMAC signature
@@ -142,9 +186,10 @@ cp .env.example .env
 Edit `.env`:
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-...
+GROQ_API_KEY=gsk_...
 GITHUB_TOKEN=ghp_...
 GITHUB_WEBHOOK_SECRET=your_secret_here
+REPO_FULL_NAME=owner/repo
 ```
 
 ### 3. Start the server
@@ -171,9 +216,11 @@ Now push a broken commit and watch the agent post a report.
 
 ---
 
-## Roadmap
+## Deployment
 
-- [x] Weekend 1 — FastAPI webhook + Log Analyser + Blame Tracer
-- [x] Weekend 2 — RAG indexer + Fix Proposer + Validator + PR Reporter + push-based reindex
-- [ ] Weekend 3 — MCP server + Docker + deploy to Railway
-# live render test Thu 21 May 2026 10:48:10 IST
+The agent is deployed on Render using Docker. To deploy your own instance:
+
+1. Fork this repo
+2. Connect to [Render](https://render.com) → New Web Service → select your fork
+3. Add env vars: `GROQ_API_KEY`, `GITHUB_TOKEN`, `GITHUB_WEBHOOK_SECRET`, `REPO_FULL_NAME`
+4. Deploy — Render auto-detects the Dockerfile
