@@ -1,17 +1,17 @@
 import json
-import anthropic
+from groq import Groq
 from agent.state import AgentState
-from config import ANTHROPIC_API_KEY
+from config import GROQ_API_KEY
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+client = Groq(api_key=GROQ_API_KEY)
 
 
 def log_analyser(state: AgentState) -> AgentState:
     """Analyse build logs and extract error information."""
     raw_logs = state["raw_logs"]
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
         max_tokens=1024,
         messages=[
             {
@@ -35,8 +35,7 @@ Return only valid JSON, no explanation."""
     )
 
     try:
-        text = response.content[0].text.strip()
-        # Strip markdown code block if present
+        text = response.choices[0].message.content.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -44,7 +43,7 @@ Return only valid JSON, no explanation."""
         error_analysis = json.loads(text.strip())
     except json.JSONDecodeError:
         error_analysis = {
-            "error_message": response.content[0].text,
+            "error_message": response.choices[0].message.content,
             "file": None,
             "line_number": None,
             "root_cause_category": "unknown",

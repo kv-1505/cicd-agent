@@ -1,19 +1,19 @@
 import json
-import anthropic
+from groq import Groq
 from agent.state import AgentState
-from config import ANTHROPIC_API_KEY
+from config import GROQ_API_KEY
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+client = Groq(api_key=GROQ_API_KEY)
 
 
 def fix_proposer(state: AgentState) -> AgentState:
-    """Propose a fix for the build failure using Claude."""
+    """Propose a fix for the build failure using Groq."""
     error_analysis = state["error_analysis"]
     blame_result = state["blame_result"]
     context = state["retrieved_context"]
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
         max_tokens=2048,
         messages=[
             {
@@ -51,7 +51,7 @@ Return only valid JSON, no explanation."""
     )
 
     try:
-        text = response.content[0].text.strip()
+        text = response.choices[0].message.content.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -62,7 +62,7 @@ Return only valid JSON, no explanation."""
             "file": error_analysis.get("file", "unknown"),
             "original_code": "",
             "fixed_code": "",
-            "explanation": response.content[0].text,
+            "explanation": response.choices[0].message.content,
             "confidence": 0.3
         }
 
