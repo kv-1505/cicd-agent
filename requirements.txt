@@ -8,3 +8,4 @@ httpx
 requests
 rank-bm25
 gitpython
+mcp
