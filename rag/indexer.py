@@ -1,34 +1,19 @@
 import os
 import ast
+import json
 import shutil
 import tempfile
-import numpy as np
-import faiss
-from sentence_transformers import SentenceTransformer
 from git import Repo
-from config import EMBEDDING_MODEL, FAISS_INDEX_PATH
-
-_model = None
-
-
-def get_model():
-    global _model
-    if _model is None:
-        _model = SentenceTransformer(EMBEDDING_MODEL)
-    return _model
+from config import FAISS_INDEX_PATH
 
 
 def chunk_python_file(file_path: str, content: str) -> list[dict]:
-    """Chunk a Python file by function/class definitions plus top-level code."""
     chunks = []
     lines = content.split("\n")
 
     try:
         tree = ast.parse(content)
-
-        # Track which lines are covered by functions/classes
         covered_lines = set()
-        named_nodes = []
 
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -46,20 +31,18 @@ def chunk_python_file(file_path: str, content: str) -> list[dict]:
                 for i in range(start, end):
                     covered_lines.add(i)
 
-        # Collect top-level code not inside any function/class
+        # Top-level code not inside any function/class
         top_level_lines = []
         for i, line in enumerate(lines):
             if i not in covered_lines and line.strip():
                 top_level_lines.append((i + 1, line))
 
-        # Group consecutive top-level lines into chunks
         if top_level_lines:
             group = [top_level_lines[0]]
             for lineno, line in top_level_lines[1:]:
                 if lineno == group[-1][0] + 1:
                     group.append((lineno, line))
                 else:
-                    # Save previous group
                     chunks.append({
                         "file": file_path,
                         "name": f"top_level_lines_{group[0][0]}-{group[-1][0]}",
@@ -69,7 +52,6 @@ def chunk_python_file(file_path: str, content: str) -> list[dict]:
                         "code": "\n".join(l for _, l in group)
                     })
                     group = [(lineno, line)]
-            # Save last group
             chunks.append({
                 "file": file_path,
                 "name": f"top_level_lines_{group[0][0]}-{group[-1][0]}",
@@ -79,7 +61,6 @@ def chunk_python_file(file_path: str, content: str) -> list[dict]:
                 "code": "\n".join(l for _, l in group)
             })
 
-        # Always add the whole file as one chunk for full context
         chunks.append({
             "file": file_path,
             "name": f"{os.path.basename(file_path)} (full file)",
@@ -90,7 +71,6 @@ def chunk_python_file(file_path: str, content: str) -> list[dict]:
         })
 
     except SyntaxError:
-        # If parsing fails (broken file), still index it as-is
         chunks.append({
             "file": file_path,
             "name": f"{os.path.basename(file_path)} (full file - syntax error)",
@@ -103,8 +83,7 @@ def chunk_python_file(file_path: str, content: str) -> list[dict]:
     return chunks
 
 
-def index_repository(repo_url: str, local_path: str = None) -> tuple[faiss.Index, list[dict]]:
-    """Clone repo and index all Python files into FAISS."""
+def index_repository(repo_url: str, local_path: str = None):
     temp_dir = None
 
     if local_path and os.path.exists(local_path):
@@ -117,7 +96,6 @@ def index_repository(repo_url: str, local_path: str = None) -> tuple[faiss.Index
 
     chunks = []
     for root, dirs, files in os.walk(repo_path):
-        # Skip hidden dirs and common non-code dirs
         dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['venv', 'node_modules', '__pycache__']]
         for file in files:
             if file.endswith('.py'):
@@ -133,26 +111,11 @@ def index_repository(repo_url: str, local_path: str = None) -> tuple[faiss.Index
 
     if not chunks:
         print("[RAG] No Python files found to index")
-        return None, []
+        return
 
     print(f"[RAG] Indexing {len(chunks)} chunks from {len(set(c['file'] for c in chunks))} files")
 
-    # Embed all chunks
-    texts = [f"{c['file']}:{c['name']}\n{c['code']}" for c in chunks]
-    embeddings = get_model().encode(texts, show_progress_bar=True)
-    embeddings = np.array(embeddings).astype('float32')
-
-    # Build FAISS index
-    dimension = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dimension)
-    index.add(embeddings)
-
-    # Save index
     os.makedirs(os.path.dirname(FAISS_INDEX_PATH), exist_ok=True)
-    faiss.write_index(index, FAISS_INDEX_PATH + ".index")
-
-    # Save chunks metadata
-    import json
     with open(FAISS_INDEX_PATH + ".chunks.json", 'w') as f:
         json.dump(chunks, f)
 
@@ -160,4 +123,3 @@ def index_repository(repo_url: str, local_path: str = None) -> tuple[faiss.Index
         shutil.rmtree(temp_dir)
 
     print(f"[RAG] Index saved to {FAISS_INDEX_PATH}")
-    return index, chunks

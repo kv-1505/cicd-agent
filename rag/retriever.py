@@ -1,54 +1,46 @@
 import os
 import json
-import numpy as np
-import faiss
-from sentence_transformers import SentenceTransformer
-from config import EMBEDDING_MODEL, FAISS_INDEX_PATH
+import re
+from config import FAISS_INDEX_PATH
 
-_model = None
-
-
-def get_model():
-    global _model
-    if _model is None:
-        _model = SentenceTransformer(EMBEDDING_MODEL)
-    return _model
-
-_index = None
 _chunks = None
 
 
-def load_index():
-    global _index, _chunks
-    index_file = FAISS_INDEX_PATH + ".index"
+def tokenize(text: str) -> list[str]:
+    return re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", text.lower())
+
+
+def load_chunks():
+    global _chunks
     chunks_file = FAISS_INDEX_PATH + ".chunks.json"
-
-    if not os.path.exists(index_file):
-        return None, None
-
-    _index = faiss.read_index(index_file)
+    if not os.path.exists(chunks_file):
+        return None
     with open(chunks_file, 'r') as f:
         _chunks = json.load(f)
-
-    return _index, _chunks
+    return _chunks
 
 
 def retrieve_context(query: str, top_k: int = 5) -> str:
-    """Search FAISS index for most relevant code chunks."""
-    index, chunks = load_index()
-    if index is None:
+    from rank_bm25 import BM25Okapi
+
+    chunks = load_chunks()
+    if not chunks:
         return "No code index available."
 
-    query_embedding = get_model().encode([query]).astype('float32')
-    distances, indices = index.search(query_embedding, top_k)
+    corpus = [tokenize(f"{c['file']} {c['name']} {c['code']}") for c in chunks]
+    bm25 = BM25Okapi(corpus)
+
+    query_tokens = tokenize(query)
+    scores = bm25.get_scores(query_tokens)
+
+    top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
 
     results = []
-    for i, idx in enumerate(indices[0]):
-        if idx < len(chunks):
-            chunk = chunks[idx]
-            results.append(
-                f"# {chunk['file']} - {chunk['name']} (lines {chunk['start_line']}-{chunk['end_line']})\n"
-                f"{chunk['code']}"
-            )
+    for idx in top_indices:
+        chunk = chunks[idx]
+        results.append(
+            f"# {chunk['file']} - {chunk['name']} (lines {chunk['start_line']}-{chunk['end_line']})\n"
+            f"{chunk['code']}"
+        )
 
     return "\n\n---\n\n".join(results)

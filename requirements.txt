@@ -7,6 +7,5 @@ langchain-anthropic
 pygithub
 httpx
 requests
-faiss-cpu
-sentence-transformers
+rank-bm25
 gitpython

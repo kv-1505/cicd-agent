@@ -11,8 +11,8 @@ def code_retriever(state: AgentState) -> AgentState:
     repo_full_name = state["repo_full_name"]
 
     # Only index if no index exists yet (first ever run)
-    index_file = FAISS_INDEX_PATH + ".index"
-    if not os.path.exists(index_file):
+    chunks_file = FAISS_INDEX_PATH + ".chunks.json"
+    if not os.path.exists(chunks_file):
         print(f"[Code Retriever] No index found, indexing for the first time...")
         repo_url = f"https://{GITHUB_TOKEN}@github.com/{repo_full_name}.git"
         try:
